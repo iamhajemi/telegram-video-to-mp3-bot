@@ -12,6 +12,7 @@ from aiohttp import web
 import threading
 import aiohttp
 import time
+import signal
 
 # Conversation states
 WAITING_FOR_FILENAME = 1
@@ -26,8 +27,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Environment variables
-TOKEN = os.getenv('TELEGRAM_TOKEN', '7749282390:AAFyV3nLgCp7Qx-_R7yo-fx67PPGl0MLark')
+TOKEN = os.getenv('TELEGRAM_TOKEN')
+if not TOKEN:
+    logger.error("TELEGRAM_TOKEN environment variable bulunamadı!")
+    sys.exit(1)
 PORT = int(os.getenv('PORT', 10000))
+
+# Global değişkenler
+application = None
+web_app = None
+shutdown_event = asyncio.Event()
 
 # Web sunucusu için route'lar
 routes = web.RouteTableDef()
@@ -43,6 +52,30 @@ async def home(request):
 # Web uygulamasını oluştur
 app = web.Application()
 app.add_routes(routes)
+
+async def shutdown(signal, loop):
+    """Graceful shutdown"""
+    logger.info(f"Received exit signal {signal.name}...")
+    shutdown_event.set()
+    
+    # Stop web server
+    if web_app:
+        await web_app.cleanup()
+    
+    # Stop bot
+    if application:
+        await application.stop()
+        await application.shutdown()
+    
+    tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+    [task.cancel() for task in tasks]
+    logger.info(f"Cancelling {len(tasks)} outstanding tasks")
+    await asyncio.gather(*tasks, return_exceptions=True)
+    loop.stop()
+
+def handle_exception(loop, context):
+    msg = context.get("exception", context["message"])
+    logger.error(f"Caught exception: {msg}")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -172,7 +205,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 async def keep_alive():
     """Her 5 dakikada bir /health endpoint'ini ping eder"""
-    while True:
+    while not shutdown_event.is_set():
         try:
             async with aiohttp.ClientSession() as session:
                 url = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/health"
@@ -186,6 +219,7 @@ async def keep_alive():
         await asyncio.sleep(300)  # 5 dakika bekle
 
 async def start_bot():
+    global application
     # Bot uygulamasını başlat
     application = Application.builder().token(TOKEN).build()
 
@@ -213,21 +247,58 @@ async def start_bot():
     logger.info("Bot başlatılıyor...")
     await application.initialize()
     await application.start()
-    await application.run_polling(allowed_updates=Update.ALL_TYPES)
+    
+    try:
+        logger.info("Bot polling başlatılıyor...")
+        await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+        await application.updater.start_polling()
+    except Exception as e:
+        logger.error(f"Polling hatası: {str(e)}")
+        raise
 
 async def start_web_server():
+    global web_app
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', PORT)
     await site.start()
+    web_app = runner
     logger.info(f"Web sunucusu başlatıldı - Port: {PORT}")
 
-async def main():
-    # Web sunucusu ve botu başlat
-    await asyncio.gather(
-        start_web_server(),
-        start_bot()
-    )
+def main():
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    # Hata yakalama
+    loop.set_exception_handler(handle_exception)
+    
+    # Linux için sinyal yönetimi
+    if sys.platform != 'win32':
+        for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+            loop.add_signal_handler(
+                sig,
+                lambda s=sig: asyncio.create_task(shutdown(s, loop))
+            )
+    
+    try:
+        # Web sunucusu ve botu başlat
+        loop.run_until_complete(start_web_server())
+        loop.create_task(start_bot())
+        loop.run_forever()
+    except KeyboardInterrupt:
+        logger.info("Kapatma sinyali alındı, bot kapatılıyor...")
+        loop.run_until_complete(shutdown(signal.SIGINT, loop))
+    except Exception as e:
+        logger.error(f"Beklenmeyen hata: {str(e)}")
+    finally:
+        try:
+            pending = asyncio.all_tasks(loop)
+            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            loop.run_until_complete(loop.shutdown_asyncgens())
+            loop.close()
+        except Exception as e:
+            logger.error(f"Kapatma hatası: {str(e)}")
+        logger.info("Bot başarıyla kapatıldı")
 
 if __name__ == '__main__':
-    asyncio.run(main()) 
+    main() 
