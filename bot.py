@@ -1,14 +1,12 @@
 import os
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, ConversationHandler, CallbackQueryHandler
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, ConversationHandler
 from moviepy.editor import VideoFileClip
 import yt_dlp
 from dotenv import load_dotenv
 import tempfile
 import sys
-import asyncio
-from aiohttp import web
 
 # Conversation states
 WAITING_FOR_FILENAME = 1
@@ -30,13 +28,6 @@ TOKEN = os.getenv('TELEGRAM_TOKEN')
 if not TOKEN:
     raise ValueError("TELEGRAM_TOKEN bulunamadı!")
 
-# Web sunucusu için route'lar
-routes = web.RouteTableDef()
-
-@routes.get('/')
-async def health_check(request):
-    return web.Response(text='Bot is running!')
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         'Merhaba! Ben video dosyalarını MP3\'e dönüştüren bir botum. '
@@ -52,16 +43,21 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def ask_filename(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Video bilgilerini context'e kaydet
-    context.user_data['video'] = await update.message.video.get_file()
-    context.user_data['processing_message'] = await update.message.reply_text("Lütfen MP3 dosyası için bir isim girin (örnek: muzik)")
-    
-    # Kullanıcı bilgilerini logla
-    user = update.message.from_user
-    logger.info(f"Video alındı - Kullanıcı: {user.id} ({user.username})")
-    logger.info(f"Video boyutu: {update.message.video.file_size} bytes")
-    
-    return WAITING_FOR_FILENAME
+    try:
+        # Video bilgilerini context'e kaydet
+        context.user_data['video'] = await update.message.video.get_file()
+        context.user_data['processing_message'] = await update.message.reply_text("Lütfen MP3 dosyası için bir isim girin (örnek: muzik)")
+        
+        # Kullanıcı bilgilerini logla
+        user = update.message.from_user
+        logger.info(f"Video alındı - Kullanıcı: {user.id} ({user.username})")
+        logger.info(f"Video boyutu: {update.message.video.file_size} bytes")
+        
+        return WAITING_FOR_FILENAME
+    except Exception as e:
+        logger.error(f"Video alınırken hata: {str(e)}")
+        await update.message.reply_text("Video işlenirken bir hata oluştu. Lütfen tekrar deneyin.")
+        return ConversationHandler.END
 
 async def process_filename(update: Update, context: ContextTypes.DEFAULT_TYPE):
     temp_video = None
@@ -83,6 +79,9 @@ async def process_filename(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Video dosyasını al
         video = context.user_data.get('video')
+        if not video:
+            await update.message.reply_text("Video bulunamadı. Lütfen videoyu tekrar gönderin.")
+            return ConversationHandler.END
         
         # Geçici dosyaları oluştur
         temp_video = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False)
@@ -152,8 +151,10 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.error(f"Update {update} caused error {context.error}")
+    if update and update.message:
+        await update.message.reply_text("Bir hata oluştu. Lütfen tekrar deneyin.")
 
-async def run_bot():
+def main():
     # Bot uygulamasını başlat
     application = Application.builder().token(TOKEN).build()
 
@@ -176,30 +177,7 @@ async def run_bot():
 
     # Botu başlat
     logger.info("Bot başlatılıyor...")
-    await application.initialize()
-    await application.start()
-    await application.run_polling(allowed_updates=Update.ALL_TYPES)
-
-async def run_web_server():
-    # Web sunucusunu başlat
-    app = web.Application()
-    app.add_routes(routes)
-    
-    # Port numarasını Render'dan al veya varsayılan olarak 8080 kullan
-    port = int(os.environ.get('PORT', 8080))
-    
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
-    logger.info(f"Web sunucusu {port} portunda başlatıldı")
-
-async def main():
-    # Bot ve web sunucusunu aynı anda çalıştır
-    await asyncio.gather(
-        run_bot(),
-        run_web_server()
-    )
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
-    asyncio.run(main()) 
+    main() 
