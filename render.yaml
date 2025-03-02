@@ -6,9 +6,11 @@ services:
     envVars:
       - key: TELEGRAM_TOKEN
         sync: false
+    plan: basic
     scaling:
       minInstances: 1
       maxInstances: 1
     healthCheckPath: /health
+    healthCheckTimeout: 100
     buildCommand: ""
     startCommand: "python bot.py" 

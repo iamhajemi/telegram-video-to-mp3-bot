@@ -9,6 +9,7 @@ import tempfile
 import sys
 import asyncio
 from aiohttp import web
+import threading
 
 # Conversation states
 WAITING_FOR_FILENAME = 1
@@ -35,7 +36,11 @@ routes = web.RouteTableDef()
 
 @routes.get('/health')
 async def health_check(request):
-    return web.Response(text='Healthy')
+    return web.Response(text='Bot is running!')
+
+@routes.get('/')
+async def home(request):
+    return web.Response(text='Video to MP3 Bot is running!')
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -163,7 +168,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if update and update.message:
         await update.message.reply_text("Bir hata oluştu. Lütfen tekrar deneyin.")
 
-async def run_bot():
+def run_bot():
     # Bot uygulamasını başlat
     application = Application.builder().token(TOKEN).build()
 
@@ -186,30 +191,20 @@ async def run_bot():
 
     # Botu başlat
     logger.info("Bot başlatılıyor...")
-    await application.initialize()
-    await application.start()
-    await application.run_polling(allowed_updates=Update.ALL_TYPES)
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
 
-async def run_web_server():
-    # Web sunucusunu başlat
+def run_web_server():
     app = web.Application()
     app.add_routes(routes)
-    
-    # Port numarasını Render'dan al
-    port = int(os.environ.get('PORT', 10000))
-    
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
-    logger.info(f"Web sunucusu {port} portunda başlatıldı")
+    web.run_app(app, host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))
 
-async def main():
-    # Bot ve web sunucusunu aynı anda çalıştır
-    await asyncio.gather(
-        run_bot(),
-        run_web_server()
-    )
+def main():
+    # Web sunucusunu ayrı bir thread'de başlat
+    server_thread = threading.Thread(target=run_web_server)
+    server_thread.start()
+    
+    # Bot'u ana thread'de çalıştır
+    run_bot()
 
 if __name__ == '__main__':
-    asyncio.run(main()) 
+    main() 
