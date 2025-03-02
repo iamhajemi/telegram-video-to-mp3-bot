@@ -1,5 +1,5 @@
 services:
-  - type: worker
+  - type: web
     name: telegram-video-to-mp3-bot
     env: docker
     dockerfilePath: ./Dockerfile
@@ -9,6 +9,6 @@ services:
     scaling:
       minInstances: 1
       maxInstances: 1
-    plan: free # Ücretsiz plan
-    buildCommand: "" # Boş bırakıyoruz çünkü Dockerfile kullanıyoruz
+    healthCheckPath: /health
+    buildCommand: ""
     startCommand: "python bot.py" 
