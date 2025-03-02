@@ -29,7 +29,8 @@ logger = logging.getLogger(__name__)
 if os.path.exists('.env'):
     load_dotenv()
 
-TOKEN = os.getenv('TELEGRAM_TOKEN')
+# Telegram token'ı al
+TOKEN = '7749282390:AAFyV3nLgCp7Qx-_R7yo-fx67PPGl0MLark'  # Doğrudan token'ı kullan
 if not TOKEN:
     raise ValueError("TELEGRAM_TOKEN bulunamadı!")
 
