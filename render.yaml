@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: telegram-video-to-mp3-bot
+    env: docker
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: TELEGRAM_TOKEN
+        sync: false
+    scaling:
+      minInstances: 1
+      maxInstances: 1 
