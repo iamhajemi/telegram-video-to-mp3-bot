@@ -95,6 +95,19 @@ async def ask_filename(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         # Video bilgilerini context'e kaydet
         context.user_data['video'] = await update.message.video.get_file()
+        
+        # Eğer caption varsa, direkt işleme başla
+        if update.message.caption:
+            # Kullanıcı bilgilerini logla
+            user = update.message.from_user
+            logger.info(f"Video ve caption alındı - Kullanıcı: {user.id} ({user.username})")
+            logger.info(f"Video boyutu: {update.message.video.file_size} bytes")
+            logger.info(f"Caption: {update.message.caption}")
+            
+            # Process filename'i direkt çağır
+            return await process_filename(update, context, update.message.caption)
+        
+        # Caption yoksa, isim iste
         context.user_data['processing_message'] = await update.message.reply_text("Lütfen MP3 dosyası için bir isim girin (örnek: muzik)")
         
         # Kullanıcı bilgilerini logla
@@ -108,23 +121,26 @@ async def ask_filename(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Video işlenirken bir hata oluştu. Lütfen tekrar deneyin.")
         return ConversationHandler.END
 
-async def process_filename(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def process_filename(update: Update, context: ContextTypes.DEFAULT_TYPE, caption_filename: str = None):
     temp_video = None
     temp_audio = None
     video_clip = None
     
     try:
         # Dosya adını al ve .mp3 uzantısını ekle
-        filename = update.message.text.strip()
+        filename = caption_filename if caption_filename else update.message.text.strip()
         if not filename:
             await update.message.reply_text("Geçerli bir dosya adı girmelisiniz. Lütfen tekrar deneyin.")
             return WAITING_FOR_FILENAME
             
         mp3_filename = f"{filename}.mp3"
         
-        # İşlem başladı mesajını güncelle
-        processing_message = context.user_data.get('processing_message')
-        await processing_message.edit_text("Video işleniyor...")
+        # İşlem başladı mesajını gönder veya güncelle
+        if caption_filename:
+            processing_message = await update.message.reply_text("Video işleniyor...")
+        else:
+            processing_message = context.user_data.get('processing_message')
+            await processing_message.edit_text("Video işleniyor...")
         
         # Video dosyasını al
         video = context.user_data.get('video')
