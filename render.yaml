@@ -6,7 +6,6 @@ services:
     envVars:
       - key: TELEGRAM_TOKEN
         sync: false
-    plan: basic
     scaling:
       minInstances: 1
       maxInstances: 1
