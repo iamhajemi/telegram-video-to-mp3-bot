@@ -10,6 +10,8 @@ import sys
 import asyncio
 from aiohttp import web
 import threading
+import aiohttp
+import time
 
 # Conversation states
 WAITING_FOR_FILENAME = 1
@@ -168,7 +170,30 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if update and update.message:
         await update.message.reply_text("Bir hata oluştu. Lütfen tekrar deneyin.")
 
-def run_bot():
+async def self_ping():
+    """Her 10 dakikada bir /health endpoint'ini ping eder"""
+    app_url = os.getenv('RENDER_EXTERNAL_URL')
+    if not app_url:
+        logger.warning("RENDER_EXTERNAL_URL bulunamadı, self-ping devre dışı")
+        return
+        
+    ping_url = f"{app_url}/health"
+    logger.info(f"Self-ping başlatılıyor: {ping_url}")
+    
+    async with aiohttp.ClientSession() as session:
+        while True:
+            try:
+                async with session.get(ping_url) as response:
+                    if response.status == 200:
+                        logger.info("Self-ping başarılı")
+                    else:
+                        logger.warning(f"Self-ping başarısız: {response.status}")
+            except Exception as e:
+                logger.error(f"Self-ping hatası: {str(e)}")
+            
+            await asyncio.sleep(600)  # 10 dakika bekle
+
+async def run_bot():
     # Bot uygulamasını başlat
     application = Application.builder().token(TOKEN).build()
 
@@ -189,22 +214,22 @@ def run_bot():
     # Hata işleyici ekle
     application.add_error_handler(error_handler)
 
+    # Self-ping task'ı başlat
+    asyncio.create_task(self_ping())
+
     # Botu başlat
     logger.info("Bot başlatılıyor...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
-
-def run_web_server():
-    app = web.Application()
-    app.add_routes(routes)
-    web.run_app(app, host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))
+    await application.initialize()
+    await application.start()
+    await application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 def main():
     # Web sunucusunu ayrı bir thread'de başlat
-    server_thread = threading.Thread(target=run_web_server)
+    server_thread = threading.Thread(target=lambda: asyncio.run(web._run_app(app, host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))))
     server_thread.start()
     
     # Bot'u ana thread'de çalıştır
-    run_bot()
+    asyncio.run(run_bot())
 
 if __name__ == '__main__':
     main() 
