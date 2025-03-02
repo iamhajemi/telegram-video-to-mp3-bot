@@ -44,6 +44,10 @@ async def health_check(request):
 async def home(request):
     return web.Response(text='Video to MP3 Bot is running!')
 
+# Web uygulamasını oluştur
+app = web.Application()
+app.add_routes(routes)
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         'Merhaba! Ben video dosyalarını MP3\'e dönüştüren bir botum. '
@@ -223,9 +227,15 @@ async def run_bot():
     await application.start()
     await application.run_polling(allowed_updates=Update.ALL_TYPES)
 
+async def run_web_server():
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', int(os.environ.get('PORT', 10000)))
+    await site.start()
+
 def main():
     # Web sunucusunu ayrı bir thread'de başlat
-    server_thread = threading.Thread(target=lambda: asyncio.run(web._run_app(app, host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))))
+    server_thread = threading.Thread(target=lambda: asyncio.run(run_web_server()))
     server_thread.start()
     
     # Bot'u ana thread'de çalıştır
