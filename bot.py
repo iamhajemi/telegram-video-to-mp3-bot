@@ -25,14 +25,9 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# Sadece development ortamında .env dosyasını yükle
-if os.path.exists('.env'):
-    load_dotenv()
-
-# Telegram token'ı al
-TOKEN = '7749282390:AAFyV3nLgCp7Qx-_R7yo-fx67PPGl0MLark'  # Doğrudan token'ı kullan
-if not TOKEN:
-    raise ValueError("TELEGRAM_TOKEN bulunamadı!")
+# Environment variables
+TOKEN = os.getenv('TELEGRAM_TOKEN', '7749282390:AAFyV3nLgCp7Qx-_R7yo-fx67PPGl0MLark')
+PORT = int(os.getenv('PORT', 10000))
 
 # Web sunucusu için route'lar
 routes = web.RouteTableDef()
@@ -175,30 +170,22 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if update and update.message:
         await update.message.reply_text("Bir hata oluştu. Lütfen tekrar deneyin.")
 
-async def self_ping():
-    """Her 10 dakikada bir /health endpoint'ini ping eder"""
-    app_url = os.getenv('RENDER_EXTERNAL_URL')
-    if not app_url:
-        logger.warning("RENDER_EXTERNAL_URL bulunamadı, self-ping devre dışı")
-        return
-        
-    ping_url = f"{app_url}/health"
-    logger.info(f"Self-ping başlatılıyor: {ping_url}")
-    
-    async with aiohttp.ClientSession() as session:
-        while True:
-            try:
-                async with session.get(ping_url) as response:
+async def keep_alive():
+    """Her 5 dakikada bir /health endpoint'ini ping eder"""
+    while True:
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/health"
+                async with session.get(url) as response:
                     if response.status == 200:
-                        logger.info("Self-ping başarılı")
+                        logger.info("Keep-alive ping başarılı")
                     else:
-                        logger.warning(f"Self-ping başarısız: {response.status}")
-            except Exception as e:
-                logger.error(f"Self-ping hatası: {str(e)}")
-            
-            await asyncio.sleep(600)  # 10 dakika bekle
+                        logger.warning(f"Keep-alive ping başarısız: {response.status}")
+        except Exception as e:
+            logger.error(f"Keep-alive ping hatası: {str(e)}")
+        await asyncio.sleep(300)  # 5 dakika bekle
 
-async def run_bot():
+async def start_bot():
     # Bot uygulamasını başlat
     application = Application.builder().token(TOKEN).build()
 
@@ -219,8 +206,8 @@ async def run_bot():
     # Hata işleyici ekle
     application.add_error_handler(error_handler)
 
-    # Self-ping task'ı başlat
-    asyncio.create_task(self_ping())
+    # Keep-alive task'ı başlat
+    asyncio.create_task(keep_alive())
 
     # Botu başlat
     logger.info("Bot başlatılıyor...")
@@ -228,19 +215,19 @@ async def run_bot():
     await application.start()
     await application.run_polling(allowed_updates=Update.ALL_TYPES)
 
-async def run_web_server():
+async def start_web_server():
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', int(os.environ.get('PORT', 10000)))
+    site = web.TCPSite(runner, '0.0.0.0', PORT)
     await site.start()
+    logger.info(f"Web sunucusu başlatıldı - Port: {PORT}")
 
-def main():
-    # Web sunucusunu ayrı bir thread'de başlat
-    server_thread = threading.Thread(target=lambda: asyncio.run(run_web_server()))
-    server_thread.start()
-    
-    # Bot'u ana thread'de çalıştır
-    asyncio.run(run_bot())
+async def main():
+    # Web sunucusu ve botu başlat
+    await asyncio.gather(
+        start_web_server(),
+        start_bot()
+    )
 
 if __name__ == '__main__':
-    main() 
+    asyncio.run(main()) 
