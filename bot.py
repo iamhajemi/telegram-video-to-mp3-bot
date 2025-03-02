@@ -7,6 +7,8 @@ import yt_dlp
 from dotenv import load_dotenv
 import tempfile
 import sys
+import asyncio
+from aiohttp import web
 
 # Conversation states
 WAITING_FOR_FILENAME = 1
@@ -27,6 +29,13 @@ if os.path.exists('.env'):
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 if not TOKEN:
     raise ValueError("TELEGRAM_TOKEN bulunamadı!")
+
+# Web sunucusu için route'lar
+routes = web.RouteTableDef()
+
+@routes.get('/')
+async def health_check(request):
+    return web.Response(text='Bot is running!')
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -144,7 +153,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.error(f"Update {update} caused error {context.error}")
 
-def main():
+async def run_bot():
     # Bot uygulamasını başlat
     application = Application.builder().token(TOKEN).build()
 
@@ -167,7 +176,30 @@ def main():
 
     # Botu başlat
     logger.info("Bot başlatılıyor...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    await application.initialize()
+    await application.start()
+    await application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+async def run_web_server():
+    # Web sunucusunu başlat
+    app = web.Application()
+    app.add_routes(routes)
+    
+    # Port numarasını Render'dan al veya varsayılan olarak 8080 kullan
+    port = int(os.environ.get('PORT', 8080))
+    
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    logger.info(f"Web sunucusu {port} portunda başlatıldı")
+
+async def main():
+    # Bot ve web sunucusunu aynı anda çalıştır
+    await asyncio.gather(
+        run_bot(),
+        run_web_server()
+    )
 
 if __name__ == '__main__':
-    main() 
+    asyncio.run(main()) 
